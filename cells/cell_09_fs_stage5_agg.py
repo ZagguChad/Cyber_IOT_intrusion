@@ -1,77 +1,110 @@
 # ======================================
 # FEATURE SELECTION — STAGE 5
-# Feature Aggregation Strategy
+# Hybrid Feature Ranking Aggregation
 # ======================================
-# Combine outputs from all selection methods using a voting/scoring
-# approach. Features earn points for being selected by each method.
+# Combine results from RF importance, correlation filter, RFE-XGBoost,
+# and Red Ant selection using multiplicative hybrid scoring.
+#
+# Hybrid Score = RF_Importance_Weight × RFE_Selection_Weight × RedAnt_Frequency
 
-print("Stage 5: Feature Aggregation Strategy")
+print("Stage 5: Hybrid Feature Ranking Aggregation")
 print("=" * 55)
 
 t0 = time.time()
 
 all_features = list(X_full.columns)
 
-# Score each feature: +1 point per method that selects it
-# Method 1: RF Importance - top 75% of features by importance
-rf_top_n = max(10, int(len(all_features) * 0.75))
-rf_top_features = set(rf_importance_df.head(rf_top_n)['Feature'].tolist())
+# --- Compute per-method weights for each feature ---
 
-# Method 2: Correlation Filter survivors
+# 1) RF Importance Weight (normalized to [0, 1])
+max_rf_imp = rf_importance_df['Importance'].max()
+rf_weight_map = {}
+for _, row in rf_importance_df.iterrows():
+    rf_weight_map[row['Feature']] = row['Importance'] / max_rf_imp if max_rf_imp > 0 else 0
+
+# 2) Correlation Filter Weight: 1.0 if survived, 0.1 if removed
 corr_survivors = set(features_after_corr)
 
-# Method 3: RFE-XGBoost selected
-rfe_set = rfe_selected_set
+# 3) RFE Selection Weight: 1.0 if selected, scaled by (1/rank) if not
+rfe_weight_map = {}
+max_rfe_rank = max(rfe_ranking.values()) if rfe_ranking else 1
+for feat in features_after_corr:
+    if feat in rfe_selected_set:
+        rfe_weight_map[feat] = 1.0
+    else:
+        rfe_weight_map[feat] = 1.0 / rfe_ranking.get(feat, max_rfe_rank)
 
-# Method 4: Red Ant selected
-ant_set = ant_selected_set
+# 4) Red Ant Selection Frequency (normalized pheromone as proxy)
+#    Features in the best ant subset get 1.0, others get scaled value
+ant_weight_map = {}
+max_phero = pheromone.max() if pheromone.max() > 0 else 1.0
+for i, feat in enumerate(ant_features):
+    ant_weight_map[feat] = pheromone[i] / max_phero
 
-# Build aggregation table
+# --- Build hybrid aggregation table ---
 agg_records = []
 for feat in all_features:
-    score = 0
+    rf_w = rf_weight_map.get(feat, 0.001)
+    corr_w = 1.0 if feat in corr_survivors else 0.1
+    rfe_w = rfe_weight_map.get(feat, 0.1)
+    ant_w = ant_weight_map.get(feat, 0.1)
+
+    # Multiplicative hybrid score
+    hybrid_score = rf_w * corr_w * rfe_w * ant_w
+
+    # Track which methods selected this feature
     methods = []
-    if feat in rf_top_features:
-        score += 1
+    if rf_w >= 0.5:
         methods.append("RF")
     if feat in corr_survivors:
-        score += 1
         methods.append("Corr")
-    if feat in rfe_set:
-        score += 1
+    if feat in rfe_selected_set:
         methods.append("RFE")
-    if feat in ant_set:
-        score += 1
+    if feat in ant_selected_set:
         methods.append("Ant")
+
     agg_records.append({
         'Feature': feat,
-        'Score': score,
-        'RF_Importance': rf_importance_map.get(feat, 0),
-        'Methods': ', '.join(methods)
+        'RF_Weight': rf_w,
+        'Corr_Weight': corr_w,
+        'RFE_Weight': rfe_w,
+        'Ant_Weight': ant_w,
+        'Hybrid_Score': hybrid_score,
+        'Methods': ', '.join(methods),
+        'N_Methods': len(methods)
     })
 
 agg_df = pd.DataFrame(agg_records).sort_values(
-    ['Score', 'RF_Importance'], ascending=[False, False]
+    'Hybrid_Score', ascending=False
 ).reset_index(drop=True)
 
-# Select features with score >= 3 (selected by at least 3 out of 4 methods)
-# If too few, lower threshold to 2
+# --- Select features using hybrid score threshold ---
+# Use the "elbow" method: select features with score > mean score
+# But ensure at least 10 features
+mean_score = agg_df['Hybrid_Score'].mean()
+median_score = agg_df['Hybrid_Score'].median()
+
+# Threshold: features above mean score AND selected by >= 2 methods
+threshold = max(mean_score, median_score)
+final_features = agg_df[
+    (agg_df['Hybrid_Score'] > threshold) & (agg_df['N_Methods'] >= 2)
+]['Feature'].tolist()
+
+# Fallback: if too few, take top features by hybrid score
 MIN_FINAL_FEATURES = 10
-score_threshold = 3
-final_features = agg_df[agg_df['Score'] >= score_threshold]['Feature'].tolist()
-
 if len(final_features) < MIN_FINAL_FEATURES:
-    score_threshold = 2
-    final_features = agg_df[agg_df['Score'] >= score_threshold]['Feature'].tolist()
+    final_features = agg_df.head(MIN_FINAL_FEATURES)['Feature'].tolist()
 
-print("\nAggregation Table (all features):")
-print(f"{'Feature':<20}{'Score':<7}{'RF_Importance':<15}{'Methods'}")
-print("-" * 65)
+print("\nHybrid Aggregation Table (all features):")
+print(f"{'Feature':<18}{'RF_W':<8}{'Corr':<6}{'RFE_W':<8}{'Ant_W':<8}{'Hybrid':<10}{'Methods'}")
+print("-" * 80)
 for _, row in agg_df.iterrows():
-    marker = " [SELECTED]" if row['Feature'] in final_features else ""
-    print(f"{row['Feature']:<20}{row['Score']:<7}{row['RF_Importance']:<15.6f}{row['Methods']}{marker}")
+    marker = " << SELECTED" if row['Feature'] in final_features else ""
+    print(f"{row['Feature']:<18}{row['RF_Weight']:<8.4f}{row['Corr_Weight']:<6.1f}"
+          f"{row['RFE_Weight']:<8.4f}{row['Ant_Weight']:<8.4f}"
+          f"{row['Hybrid_Score']:<10.6f}{row['Methods']}{marker}")
 
-print(f"\nSelection threshold: score >= {score_threshold}")
+print(f"\nHybrid score threshold: {threshold:.6f}")
 print(f"Final selected features: {len(final_features)}")
 print(f"Features: {final_features}")
 print(f"\nCompleted in {time.time()-t0:.1f}s")
