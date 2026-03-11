@@ -2,13 +2,16 @@
 # FEATURE SELECTION — STAGE 2
 # Correlation-Based Redundancy Removal
 # ======================================
-# Remove one feature from each highly-correlated pair (|r| >= 0.90),
+# Remove one feature from each highly-correlated pair (|r| >= 0.95),
 # keeping the one with higher RF importance.
+# NOTE: Threshold raised from 0.90 to 0.95 to preserve more features.
+# A 0.90 threshold was too aggressive and removed features critical
+# for detecting minority attack classes.
 
 print("Stage 2: Correlation-Based Redundancy Removal")
 print("=" * 55)
 
-CORR_THRESHOLD = 0.90
+CORR_THRESHOLD = 0.95  # Raised from 0.90 to preserve more features
 
 t0 = time.time()
 

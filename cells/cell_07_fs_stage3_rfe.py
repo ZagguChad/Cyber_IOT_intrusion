@@ -4,6 +4,7 @@
 # ======================================
 # Recursive Feature Elimination using XGBoost as the estimator.
 # Uses features that survived the correlation filter.
+# NOTE: Target raised to 75% (from 60%) to keep more features.
 
 from sklearn.feature_selection import RFE
 from xgboost import XGBClassifier
@@ -36,13 +37,14 @@ xgb_rfe = XGBClassifier(
     verbosity=0
 )
 
-# Target: select ~60% of remaining features (minimum 10)
-n_target = max(10, int(len(features_after_corr) * 0.6))
+# Target: select 75% of remaining features (minimum 15)
+# Raised from 60% to be less aggressive
+n_target = max(15, int(len(features_after_corr) * 0.75))
 
 rfe = RFE(
     estimator=xgb_rfe,
     n_features_to_select=n_target,
-    step=2,
+    step=1,  # Remove 1 at a time for finer granularity
     verbose=0
 )
 rfe.fit(X_rfe_sample, y_rfe_sample)

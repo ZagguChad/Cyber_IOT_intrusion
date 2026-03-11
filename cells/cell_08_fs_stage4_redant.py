@@ -3,10 +3,15 @@
 # Red Ant Feature Selection Algorithm
 # ======================================
 # Swarm intelligence optimisation inspired by ant colony search.
-# Each ant selects a random feature subset, evaluates fitness,
-# and the colony converges on the best subset over iterations.
+# Each ant selects a random feature subset and evaluates fitness.
 #
-# Fitness = Accuracy - lambda * (n_selected / n_total)
+# Fitness = Balanced_Accuracy - lambda * (n_selected / n_total)
+#
+# CHANGES:
+# - Lambda reduced from 0.05 to 0.01 (less aggressive feature penalty)
+# - MIN_FEATURES raised from 5 to 10
+# - Uses balanced_accuracy instead of accuracy (better for imbalanced data)
+# - Increased subsample to 80K for more representative evaluation
 
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import cross_val_score
@@ -20,8 +25,8 @@ t0 = time.time()
 # Parameters
 N_ANTS = 20                # number of ants per iteration
 N_ITERATIONS = 15          # total iterations
-LAMBDA_PENALTY = 0.05      # simplicity penalty
-MIN_FEATURES = 5           # minimum features an ant can select
+LAMBDA_PENALTY = 0.01      # Reduced from 0.05 — less pressure to drop features
+MIN_FEATURES = 10          # Raised from 5 — ensure enough for minority classes
 EVAPORATION = 0.3          # pheromone evaporation rate
 ALPHA = 1.0                # pheromone influence
 BETA = 2.0                 # heuristic (RF importance) influence
@@ -30,8 +35,8 @@ BETA = 2.0                 # heuristic (RF importance) influence
 ant_features = features_after_corr.copy()
 n_features = len(ant_features)
 
-# Subsample for speed
-ANT_SAMPLE = min(50_000, len(X_full))
+# Subsample for speed — raised to 80K for better representation
+ANT_SAMPLE = min(80_000, len(X_full))
 idx_ant = np.random.choice(len(X_full), ANT_SAMPLE, replace=False)
 X_ant = X_full[ant_features].iloc[idx_ant]
 y_ant = y_full.iloc[idx_ant]
@@ -43,9 +48,9 @@ pheromone = np.ones(n_features)
 heuristic = np.array([rf_importance_map.get(f, 0.001) for f in ant_features])
 heuristic = heuristic / heuristic.sum()
 
-# Quick classifier for fitness evaluation
+# Quick classifier for fitness evaluation — uses balanced_accuracy
 def evaluate_subset(feature_indices, X_data, y_data):
-    """Evaluate a feature subset using RF accuracy (3-fold CV)."""
+    """Evaluate a feature subset using balanced accuracy (3-fold CV)."""
     if len(feature_indices) == 0:
         return 0.0
     X_sub = X_data.iloc[:, feature_indices]
@@ -53,9 +58,11 @@ def evaluate_subset(feature_indices, X_data, y_data):
         n_estimators=50,
         max_depth=12,
         n_jobs=-1,
-        random_state=RANDOM_SEED
+        random_state=RANDOM_SEED,
+        class_weight='balanced'
     )
-    scores = cross_val_score(clf, X_sub, y_data, cv=3, scoring='accuracy', n_jobs=-1)
+    scores = cross_val_score(clf, X_sub, y_data, cv=3,
+                             scoring='balanced_accuracy', n_jobs=-1)
     return scores.mean()
 
 # Track best solution
@@ -110,7 +117,7 @@ for iteration in range(N_ITERATIONS):
 
     print(f"  Iter {iteration+1:>2}/{N_ITERATIONS}  |  "
           f"Best fitness: {iter_best_fitness:.4f}  |  "
-          f"Accuracy: {iter_best_acc:.4f}  |  "
+          f"Bal. Accuracy: {iter_best_acc:.4f}  |  "
           f"Features: {len(iter_best_subset) if iter_best_subset is not None else 0}")
 
 # Extract best feature names
@@ -119,8 +126,8 @@ ant_selected_set = set(ant_selected_features)
 
 print(f"\n{'='*55}")
 print(f"Red Ant Best Solution:")
-print(f"  Fitness:        {best_fitness:.4f}")
-print(f"  Accuracy:       {best_accuracy:.4f}")
-print(f"  Features:       {len(ant_selected_features)}")
-print(f"  Selected:       {ant_selected_features}")
+print(f"  Fitness:          {best_fitness:.4f}")
+print(f"  Bal. Accuracy:    {best_accuracy:.4f}")
+print(f"  Features:         {len(ant_selected_features)}")
+print(f"  Selected:         {ant_selected_features}")
 print(f"Completed in {time.time()-t0:.1f}s")
