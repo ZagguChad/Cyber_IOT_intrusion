@@ -2,11 +2,8 @@
 # EVALUATION 5 - BASELINE & NO-FS COMPARISON
 # ======================================
 # Compares individual models, our ensemble, and a no-FS baseline.
-#
-# PERFORMANCE FIXES:
-# - Removed LogisticRegression (too slow on SMOTE-inflated multi-class)
-# - No-FS baseline uses subsample to avoid SMOTE memory explosion
-# - All models print progress to prevent Jupyter timeout
+# FIX: No-FS baseline now uses the SAME test set (X_test_full)
+#      for a fair comparison instead of creating a separate split.
 
 print("Training Baseline Models for Comparison...")
 print()
@@ -54,44 +51,46 @@ baselines['Adaptive Ensemble (w/ FS)'] = {
 print(f"  Adaptive Ensemble: (pre-computed)")
 
 # --- NO FEATURE SELECTION BASELINE ---
-# Train XGBoost on ALL original features (no FS) using a SUBSAMPLE
-# to avoid SMOTE memory explosion on 49 columns.
+# FIX: Uses the SAME train/test split for fair comparison.
+# Trains XGBoost on ALL original features (no feature selection).
 print("\n  Training NO-Feature-Selection Baseline...")
+print("  (Same train/test split for fair comparison)")
 t0 = time.time()
 
-# Subsample the original data (max 300K) to keep SMOTE fast
-NOFS_SAMPLE = min(300_000, len(X_full))
-nofs_idx = np.random.choice(len(X_full), NOFS_SAMPLE, replace=False)
-X_nofs = X_full.iloc[nofs_idx]
-y_nofs = y_full.iloc[nofs_idx]
+# Use ALL features from training data (no feature selection)
+# Use y_train_orig (pre-SMOTE) to apply SMOTE independently
+X_nofs_train = X_train_full.copy()
+X_nofs_test = X_test_full.copy()
+y_nofs_train = y_train_orig.copy()  # pre-SMOTE labels from cell_12
 
-X_nofs_train, X_nofs_test, y_nofs_train, y_nofs_test = train_test_split(
-    X_nofs, y_nofs, test_size=0.2, random_state=RANDOM_SEED, stratify=y_nofs
-)
-print(f"    No-FS train size: {len(X_nofs_train):,}")
+# Handle NaN/Inf
+X_nofs_train.replace([np.inf, -np.inf], np.nan, inplace=True)
+X_nofs_train.fillna(0, inplace=True)
+X_nofs_test.replace([np.inf, -np.inf], np.nan, inplace=True)
+X_nofs_test.fillna(0, inplace=True)
 
-# Apply SMOTE (on subsampled data — fast)
-smote_nofs = SMOTE(random_state=RANDOM_SEED)
-X_nofs_train_sm, y_nofs_train_sm = smote_nofs.fit_resample(X_nofs_train, y_nofs_train)
-print(f"    After SMOTE: {len(X_nofs_train_sm):,}")
-
-# Scale
+# Scale — fit on train only
 scaler_nofs = StandardScaler()
-X_nofs_train_sc = pd.DataFrame(scaler_nofs.fit_transform(X_nofs_train_sm),
-                                columns=X_nofs_train_sm.columns)
+X_nofs_train_sc = pd.DataFrame(scaler_nofs.fit_transform(X_nofs_train),
+                                columns=X_nofs_train.columns)
 X_nofs_test_sc = pd.DataFrame(scaler_nofs.transform(X_nofs_test),
                                columns=X_nofs_test.columns)
 
+# Apply SMOTE on training data
+smote_nofs = SMOTE(random_state=RANDOM_SEED)
+X_nofs_train_sm, y_nofs_train_sm = smote_nofs.fit_resample(X_nofs_train_sc, y_nofs_train)
+print(f"    No-FS train size (after SMOTE): {len(X_nofs_train_sm):,}")
+
 # Train XGBoost without feature selection
-nofs_xgb = XGBClassifier(n_estimators=100, tree_method='hist', device='cuda',
-                          random_state=RANDOM_SEED, verbosity=0)
-nofs_xgb.fit(X_nofs_train_sc, y_nofs_train_sm)
+nofs_xgb = XGBClassifier(n_estimators=200, max_depth=10, tree_method='hist',
+                          device='cuda', random_state=RANDOM_SEED, verbosity=0)
+nofs_xgb.fit(X_nofs_train_sm, y_nofs_train_sm)
 nofs_preds = nofs_xgb.predict(X_nofs_test_sc)
 
 baselines['XGBoost (NO FS)'] = {
-    'Accuracy': accuracy_score(y_nofs_test, nofs_preds),
-    'Macro F1': f1_score(y_nofs_test, nofs_preds, average='macro'),
-    'Weighted F1': f1_score(y_nofs_test, nofs_preds, average='weighted')
+    'Accuracy': accuracy_score(y_test, nofs_preds),
+    'Macro F1': f1_score(y_test, nofs_preds, average='macro'),
+    'Weighted F1': f1_score(y_test, nofs_preds, average='weighted')
 }
 print(f"    No-FS Baseline done: {time.time()-t0:.1f}s")
 
@@ -107,10 +106,13 @@ fs_acc = baselines['Adaptive Ensemble (w/ FS)']['Accuracy']
 nofs_acc = baselines['XGBoost (NO FS)']['Accuracy']
 fs_f1 = baselines['Adaptive Ensemble (w/ FS)']['Weighted F1']
 nofs_f1 = baselines['XGBoost (NO FS)']['Weighted F1']
+fs_m_f1 = baselines['Adaptive Ensemble (w/ FS)']['Macro F1']
+nofs_m_f1 = baselines['XGBoost (NO FS)']['Macro F1']
 
 print(f"\n{'='*70}")
-print("FEATURE SELECTION IMPACT:")
-print(f"  Accuracy improvement: {(fs_acc - nofs_acc)*100:+.4f}%")
+print("FEATURE SELECTION IMPACT (same test set, fair comparison):")
+print(f"  Accuracy improvement:    {(fs_acc - nofs_acc)*100:+.4f}%")
 print(f"  Weighted F1 improvement: {(fs_f1 - nofs_f1)*100:+.4f}%")
-print(f"  Feature reduction: {len(X_full.columns)} -> {len(final_features)} "
-      f"({100*(1 - len(final_features)/len(X_full.columns)):.1f}% reduction)")
+print(f"  Macro F1 improvement:    {(fs_m_f1 - nofs_m_f1)*100:+.4f}%")
+print(f"  Feature reduction: {len(X_train_full.columns)} -> {len(final_features)} "
+      f"({100*(1 - len(final_features)/len(X_train_full.columns)):.1f}% reduction)")

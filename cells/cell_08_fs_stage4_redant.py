@@ -7,11 +7,7 @@
 #
 # Fitness = Balanced_Accuracy - lambda * (n_selected / n_total)
 #
-# CHANGES:
-# - Lambda reduced from 0.05 to 0.01 (less aggressive feature penalty)
-# - MIN_FEATURES raised from 5 to 10
-# - Uses balanced_accuracy instead of accuracy (better for imbalanced data)
-# - Increased subsample to 80K for more representative evaluation
+# FIX: Uses X_train_full only to prevent data leakage.
 
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import cross_val_score
@@ -19,6 +15,7 @@ import time
 
 print("Stage 4: Red Ant Feature Selection Algorithm")
 print("=" * 55)
+print("[LEAKAGE-FREE] Using training data only")
 
 t0 = time.time()
 
@@ -31,15 +28,15 @@ EVAPORATION = 0.3          # pheromone evaporation rate
 ALPHA = 1.0                # pheromone influence
 BETA = 2.0                 # heuristic (RF importance) influence
 
-# Use features that passed correlation filter
+# Use features that passed correlation filter — from TRAINING data only
 ant_features = features_after_corr.copy()
 n_features = len(ant_features)
 
-# Subsample for speed — raised to 80K for better representation
-ANT_SAMPLE = min(80_000, len(X_full))
-idx_ant = np.random.choice(len(X_full), ANT_SAMPLE, replace=False)
-X_ant = X_full[ant_features].iloc[idx_ant]
-y_ant = y_full.iloc[idx_ant]
+# Subsample TRAINING data for speed — raised to 80K for better representation
+ANT_SAMPLE = min(80_000, len(X_train_full))
+idx_ant = np.random.choice(len(X_train_full), ANT_SAMPLE, replace=False)
+X_ant = X_train_full[ant_features].iloc[idx_ant]
+y_ant = y_train.iloc[idx_ant]
 
 # Initialize pheromone trails (uniform)
 pheromone = np.ones(n_features)

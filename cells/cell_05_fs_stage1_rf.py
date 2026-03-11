@@ -2,22 +2,24 @@
 # FEATURE SELECTION — STAGE 1
 # Tree-Based Feature Importance Ranking
 # ======================================
-# Train a Random Forest on the full dataset and rank features
+# Train a Random Forest on TRAINING data only and rank features
 # by their Gini importance scores.
+# FIX: Uses X_train_full instead of X_full to prevent data leakage.
 
 from sklearn.ensemble import RandomForestClassifier
 import time
 
 print("Stage 1: Random Forest Feature Importance Ranking")
 print("=" * 55)
+print("[LEAKAGE-FREE] Using training data only")
 
 t0 = time.time()
 
-# Use a stratified subsample for speed on large datasets
-SAMPLE_SIZE = min(200_000, len(X_full))
-idx = np.random.choice(len(X_full), SAMPLE_SIZE, replace=False)
-X_sample = X_full.iloc[idx]
-y_sample = y_full.iloc[idx]
+# Use a stratified subsample of TRAINING data for speed
+SAMPLE_SIZE = min(200_000, len(X_train_full))
+idx = np.random.choice(len(X_train_full), SAMPLE_SIZE, replace=False)
+X_sample = X_train_full.iloc[idx]
+y_sample = y_train.iloc[idx]
 
 rf_selector = RandomForestClassifier(
     n_estimators=200,
@@ -31,7 +33,7 @@ rf_selector.fit(X_sample, y_sample)
 # Build importance table
 importances = rf_selector.feature_importances_
 rf_importance_df = pd.DataFrame({
-    'Feature': X_full.columns,
+    'Feature': X_train_full.columns,
     'Importance': importances
 }).sort_values('Importance', ascending=False).reset_index(drop=True)
 rf_importance_df['Rank'] = rf_importance_df.index + 1

@@ -6,13 +6,15 @@
 # aggressive multiplicative scoring. A feature is kept if it was
 # selected by ANY 2 of the 4 methods, ensuring minority-class
 # features are not dropped by a single method's blind spot.
+# FIX: Uses X_train_full.columns to prevent data leakage.
 
 print("Stage 5: Hybrid Feature Ranking Aggregation")
 print("=" * 55)
+print("[LEAKAGE-FREE] Feature sets derived from training data only")
 
 t0 = time.time()
 
-all_features = list(X_full.columns)
+all_features = list(X_train_full.columns)
 
 # --- Score each feature: +1 per method that supports it ---
 
@@ -60,7 +62,6 @@ agg_df = pd.DataFrame(agg_records).sort_values(
 
 # --- Conservative selection: keep features with score >= 2 ---
 # This means a feature only needs 2 out of 4 methods to agree.
-# Ensures minority-class features aren't killed by one method's bias.
 MIN_FINAL_FEATURES = 15
 score_threshold = 2
 final_features = agg_df[agg_df['Score'] >= score_threshold]['Feature'].tolist()

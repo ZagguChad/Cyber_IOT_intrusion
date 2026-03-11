@@ -1,32 +1,45 @@
 # ======================================
 # APPLY FINAL FEATURE SUBSET & PREPROCESSING
 # ======================================
-# Filter the dataset to only the selected features.
-# Apply scaling/normalization for downstream models.
+# Filter BOTH train and test to selected features.
+# FIX: Fit StandardScaler on TRAINING data only, then transform both.
+# This prevents test data statistics from leaking into normalization.
 
 print("Applying Feature Selection Results")
 print("=" * 55)
 
-# Apply final feature subset
-X = X_full[final_features].copy()
-y = y_full.copy()
+# Apply final feature subset to TRAIN and TEST separately
+X_train = X_train_full[final_features].copy()
+X_test  = X_test_full[final_features].copy()
+# y_train and y_test already exist from cell_03b
 
-print(f"Feature matrix after selection: {X.shape}")
-print(f"Features: {list(X.columns)}")
+print(f"Training feature matrix: {X_train.shape}")
+print(f"Testing feature matrix:  {X_test.shape}")
+print(f"Features: {list(X_train.columns)}")
 
 # Handle any remaining NaN / Inf (safety)
-X.replace([np.inf, -np.inf], np.nan, inplace=True)
-X.fillna(0, inplace=True)
+X_train.replace([np.inf, -np.inf], np.nan, inplace=True)
+X_train.fillna(0, inplace=True)
+X_test.replace([np.inf, -np.inf], np.nan, inplace=True)
+X_test.fillna(0, inplace=True)
 
-# StandardScaler for normalization
+# StandardScaler — FIT on training data ONLY, transform both
 scaler = StandardScaler()
-X_scaled = pd.DataFrame(
-    scaler.fit_transform(X),
-    columns=X.columns,
-    index=X.index
+X_train = pd.DataFrame(
+    scaler.fit_transform(X_train),      # fit + transform on TRAIN
+    columns=X_train.columns,
+    index=X_train.index
+)
+X_test = pd.DataFrame(
+    scaler.transform(X_test),           # transform only on TEST (no fit!)
+    columns=X_test.columns,
+    index=X_test.index
 )
 
 print(f"\nPreprocessing complete:")
 print(f"  - NaN/Inf handled")
-print(f"  - StandardScaler applied")
-print(f"  - Final shape: {X_scaled.shape}")
+print(f"  - StandardScaler fitted on TRAINING data only (leakage-free)")
+print(f"  - Train shape: {X_train.shape}")
+print(f"  - Test shape:  {X_test.shape}")
+print(f"\n[INFO] Scaler statistics computed from training data only.")
+print(f"       Test data was transformed using training statistics.")

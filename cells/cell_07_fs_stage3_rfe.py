@@ -4,7 +4,7 @@
 # ======================================
 # Recursive Feature Elimination using XGBoost as the estimator.
 # Uses features that survived the correlation filter.
-# NOTE: Target raised to 75% (from 60%) to keep more features.
+# FIX: Subsamples from X_train_full only to prevent data leakage.
 
 from sklearn.feature_selection import RFE
 from xgboost import XGBClassifier
@@ -12,17 +12,18 @@ import time
 
 print("Stage 3: RFE with XGBoost (GPU)")
 print("=" * 55)
+print("[LEAKAGE-FREE] Using training data only")
 
 t0 = time.time()
 
-# Work on the correlation-filtered feature set
-X_rfe = X_full[features_after_corr].copy()
+# Work on the correlation-filtered feature set from TRAINING data only
+X_rfe = X_train_full[features_after_corr].copy()
 
 # Subsample for RFE speed
 RFE_SAMPLE = min(100_000, len(X_rfe))
 idx_rfe = np.random.choice(len(X_rfe), RFE_SAMPLE, replace=False)
 X_rfe_sample = X_rfe.iloc[idx_rfe]
-y_rfe_sample = y_full.iloc[idx_rfe]
+y_rfe_sample = y_train.iloc[idx_rfe]
 
 # XGBoost estimator with GPU
 xgb_rfe = XGBClassifier(
@@ -30,7 +31,7 @@ xgb_rfe = XGBClassifier(
     max_depth=8,
     learning_rate=0.1,
     objective='multi:softmax',
-    num_class=y_full.nunique(),
+    num_class=y_train.nunique(),
     tree_method='hist',
     device='cuda',
     random_state=RANDOM_SEED,
@@ -38,7 +39,6 @@ xgb_rfe = XGBClassifier(
 )
 
 # Target: select 75% of remaining features (minimum 15)
-# Raised from 60% to be less aggressive
 n_target = max(15, int(len(features_after_corr) * 0.75))
 
 rfe = RFE(

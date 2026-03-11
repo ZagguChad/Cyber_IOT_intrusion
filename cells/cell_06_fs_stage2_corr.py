@@ -4,18 +4,17 @@
 # ======================================
 # Remove one feature from each highly-correlated pair (|r| >= 0.95),
 # keeping the one with higher RF importance.
-# NOTE: Threshold raised from 0.90 to 0.95 to preserve more features.
-# A 0.90 threshold was too aggressive and removed features critical
-# for detecting minority attack classes.
+# FIX: Computes correlation on X_train_full only to prevent data leakage.
 
 print("Stage 2: Correlation-Based Redundancy Removal")
 print("=" * 55)
+print("[LEAKAGE-FREE] Using training data only")
 
 CORR_THRESHOLD = 0.95  # Raised from 0.90 to preserve more features
 
 t0 = time.time()
 
-corr_matrix = X_full.corr().abs()
+corr_matrix = X_train_full.corr().abs()
 
 # Upper triangle to avoid duplicate pairs
 upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
@@ -43,7 +42,7 @@ for a, b, r, keep, drop in corr_pairs[:25]:
 if len(corr_pairs) > 25:
     print(f"  ... and {len(corr_pairs)-25} more pairs")
 
-features_after_corr = [f for f in X_full.columns if f not in to_drop_corr]
+features_after_corr = [f for f in X_train_full.columns if f not in to_drop_corr]
 print(f"\nFeatures removed: {len(to_drop_corr)}  ->  {sorted(to_drop_corr)}")
 print(f"Features remaining: {len(features_after_corr)}")
 print(f"Completed in {time.time()-t0:.1f}s")
